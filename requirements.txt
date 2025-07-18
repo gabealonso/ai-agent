@@ -1,6 +1,14 @@
-langchain
-langchain-community
-langgraph
-langchain-openai
-wikipedia
-python-dotenv
+# Core LangChain packages
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-openai>=0.1.0
+
+# LangGraph for agent orchestration
+langgraph>=0.5.0
+
+# Search tools
+wikipedia>=1.4.0
+duckduckgo-search>=8.0.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
