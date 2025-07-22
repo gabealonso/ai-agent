@@ -1,221 +1,161 @@
 """
-AI Agent Main Application
+AI Agent Chat Application
 
-This is the main entry point for the AI agent application.
-It provides an interactive chat interface with conversation memory and smart tool selection.
+This is a conversational interface to chat with an AI agent that can search
+using both Wikipedia and Tavily, with conversational memory.
 """
 
-import uuid
-import warnings
-import sys
 import os
-from agents.ai_agent import build_agent_executor
+import uuid
+from dotenv import load_dotenv
+from agents.ai_agent import create_agent, generate_thread_id
 
-# Suppress RuntimeWarnings (mainly from DuckDuckGo)
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-# Global conversation memory
-conversation_memory = []
+# Load environment variables
+load_dotenv()
 
 
-def get_system_prompt():
+def setup_environment():
     """
-    Get the system prompt for the AI agent.
+    Setup environment variables and validate required API keys.
+    """
+    # Check for required API keys
+    required_keys = ["TAVILY_API_KEY"]
+    optional_keys = ["OPENAI_API_KEY"]
     
-    Returns:
-        list: List containing the system message with instructions
-    """
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful assistant with access to two tools: Wikipedia and DuckDuckGo web search. "
-                "IMPORTANT: You must choose the MOST APPROPRIATE tool for each query. "
-                "Use Wikipedia ONLY for: general knowledge, facts about people/places/animals/concepts, "
-                "historical information, or when user asks 'what is X' or 'who is X'. "
-                "Use DuckDuckGo ONLY for: current weather, recent news, real-time information, "
-                "or time-sensitive data. NEVER use both tools for the same query. "
-                "Choose ONE tool based on the type of information needed. "
-                "Always remember the information the user shares with you during the conversation. "
-                "When the user asks you about their name, respond with the name they previously told you."
-            )
-        }
-    ]
-
-
-def extract_user_name_from_history():
-    """
-    Extract user name from conversation history.
+    missing_required = []
+    missing_optional = []
     
-    Returns:
-        str or None: The user's name if found, None otherwise
-    """
-    for msg in conversation_memory:
-        if msg["role"] == "user":
-            content = msg["content"].lower()
-            if "my name is" in content:
-                return content.split("my name is")[-1].strip().split()[0]
-            elif "i'm" in content:
-                parts = content.split("i'm")
-                if len(parts) > 1:
-                    return parts[1].strip().split()[0]
-            elif "i am" in content:
-                parts = content.split("i am")
-                if len(parts) > 1:
-                    return parts[1].strip().split()[0]
-    return None
+    for key in required_keys:
+        if not os.getenv(key):
+            missing_required.append(key)
+    
+    for key in optional_keys:
+        if not os.getenv(key):
+            missing_optional.append(key)
+    
+    if missing_required:
+        print(f"⚠️ Missing required environment variables: {', '.join(missing_required)}")
+        print("These are required for the agent to function:")
+        for key in missing_required:
+            if key == "TAVILY_API_KEY":
+                print(f"  {key}=your-tavily-api-key")
+        return False
+    
+    if missing_optional:
+        print(f"⚠️ Missing optional environment variables: {', '.join(missing_optional)}")
+        print("These are optional but recommended for better performance:")
+        for key in missing_optional:
+            if key == "OPENAI_API_KEY":
+                print(f"  {key}=your-openai-api-key")
+        print("The agent will work without these keys, but may have limited functionality.")
+    
+    return True
 
 
-def enhance_user_input(user_input, user_name):
+def format_message(message):
     """
-    Enhance user input with context and tool selection guidance.
+    Format a message for display.
     
     Args:
-        user_input (str): The original user input
-        user_name (str or None): The user's name if known
+        message: The message object from LangChain
         
     Returns:
-        str: Enhanced input with context and guidance
+        str: Formatted message string
     """
-    # Add name context if asking about name
-    if user_name and ("what is my name" in user_input.lower() or "what's my name" in user_input.lower()):
-        return f"The user's name is {user_name}. Current question: {user_input}"
-    
-    # Add tool selection guidance for specific types of questions
-    elif any(word in user_input.lower() for word in ["weather", "current", "today", "latest", "recent", "now"]):
-        return f"IMPORTANT: This is a time-sensitive question. Use DuckDuckGo web search for current information. Question: {user_input}"
-    elif any(word in user_input.lower() for word in ["what is", "who is", "tell me about", "define", "explain"]):
-        return f"IMPORTANT: This is a general knowledge question. Use Wikipedia for factual information. Question: {user_input}"
-    
-    return user_input
+    # Handle different message types
+    if hasattr(message, 'content'):
+        # For AIMessage, HumanMessage, etc.
+        return str(message.content)
+    elif hasattr(message, 'pretty_print'):
+        # For messages that support pretty_print
+        return str(message)
+    elif isinstance(message, dict):
+        # For dictionary messages
+        return message.get('content', str(message))
+    else:
+        # Fallback
+        return str(message)
 
 
-def format_ai_response(content):
+def chat_with_agent(agent_executor, memory):
     """
-    Format AI response with appropriate prefix based on content.
-    
-    Args:
-        content (str): The AI response content
-        
-    Returns:
-        str: Formatted response with appropriate prefix
-    """
-    # Check for Wikipedia tool usage
-    if "wikipedia" in content.lower() or "page:" in content.lower():
-        if not content.startswith("Wikipedia: "):
-            return "Wikipedia: " + content
-    
-    # Check for web search tool usage
-    elif any(pattern in content.lower() for pattern in ["search", "duckduckgo", "weather", "oct", "jan", "sep", "2023", "2020", "·", "°c", "°f"]):
-        if not content.startswith("Web: "):
-            return "Web: " + content
-    
-    return content
-
-
-def run_agent_interaction(agent_executor, user_input):
-    """
-    Run a single interaction with the agent.
+    Chat with the AI agent in a natural conversation.
     
     Args:
         agent_executor: The configured agent executor
-        user_input (str): The user's input
-        
-    Returns:
-        bool: True if response was generated, False otherwise
+        memory: The conversation buffer memory
     """
-    try:
-        # Extract user name from history
-        user_name = extract_user_name_from_history()
-        
-        # Enhance user input with context
-        enhanced_input = enhance_user_input(user_input, user_name)
-        
-        # Add current message to memory
-        conversation_memory.append({"role": "user", "content": user_input})
-        
-        # Suppress warnings and run agent
-        with open(os.devnull, 'w') as devnull:
-            old_stderr = sys.stderr
-            sys.stderr = devnull
-            try:
-                response = agent_executor.invoke({
-                    "messages": [{"role": "user", "content": enhanced_input}],
-                    "config": {"recursion_limit": 10}
-                })
-            finally:
-                sys.stderr = old_stderr
-        
-        # Process and display response
-        response_found = False
-        for msg in response["messages"]:
-            if (hasattr(msg, 'content') and msg.content and 
-                msg.__class__.__name__ != "HumanMessage" and
-                msg.__class__.__name__ != "SystemMessage"):
-                
-                formatted_response = format_ai_response(msg.content)
-                print(f"\nAI: {formatted_response}")
-                
-                # Add AI response to memory
-                conversation_memory.append({"role": "assistant", "content": msg.content})
-                response_found = True
-                break
-        
-        if not response_found:
-            print("\nAI: No response generated. Please try again.")
-            return False
-            
-        return True
-        
-    except Exception as e:
-        print(f"\nError: {e}")
-        return False
-
-
-def main():
-    """
-    Main application entry point.
+    print("Chat with Albert 1.0")
+    print("=" * 40)
+    print("Type 'quit' to exit, 'new' to start a new conversation")
+    print("=" * 40)
+    print()
     
-    Sets up the agent, initializes conversation memory, and runs the interactive chat loop.
-    """
-    print("Initializing AI Agent...")
-    agent_executor = build_agent_executor()
-    
-    # Generate unique thread ID for this session
-    thread_id = str(uuid.uuid4())
-    print(f"Thread ID: {thread_id}")
-    print("=" * 50)
-    print("AI Agent is ready! Type 'quit' to exit.")
-    print("=" * 50)
-    
-    # Initialize conversation memory with system context
-    conversation_memory.extend(get_system_prompt())
-    
-    # Main chat loop
     while True:
         try:
             # Get user input
-            user_input = input("\nYou: ").strip()
+            user_input = input("You: ").strip()
             
             # Check for exit commands
             if user_input.lower() in ['quit', 'exit', 'q']:
                 print("Goodbye!")
                 break
             
+            # Check for new conversation command
+            if user_input.lower() == 'new':
+                # Clear memory for new conversation
+                memory.clear()
+                print("New conversation started.")
+                print()
+                continue
+            
             # Validate input
             if not user_input:
                 print("Please enter a message.")
                 continue
             
-            # Run agent interaction
-            run_agent_interaction(agent_executor, user_input)
+            # Get response from agent (memory is handled automatically)
+            response = agent_executor.invoke({"input": user_input})
+            
+            # Display agent's response
+            if "output" in response:
+                print(f"Agent: {response['output']}")
+            else:
+                print("Agent: I'm sorry, I didn't get a response. Could you try again?")
+            
+            print()
             
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
             break
         except Exception as e:
-            print(f"\nUnexpected error: {e}")
+            print(f"\nError: {e}")
+            print("Please try again.")
+
+
+def main():
+    """
+    Main application entry point.
+    """
+    print("Starting AI Agent...")
+    
+    # Setup environment
+    if not setup_environment():
+        return
+    
+    try:
+        # Create the agent
+        agent_executor, memory = create_agent()
+        print("Agent is ready to chat!")
+        print()
+        
+        # Start the conversation
+        chat_with_agent(agent_executor, memory)
+        
+    except Exception as e:
+        print(f"Failed to start agent: {e}")
+        print("Please check your configuration and try again.")
 
 
 if __name__ == "__main__":
-    main()
+    main() 
