@@ -206,10 +206,7 @@ ai-agent/
    ```
 
 2. **Set up API keys:**
-   ```bash
-   cp env.example .env
-   # Edit .env with your API keys
-   ```
+
 
 3. **Start chatting:**
    ```bash
