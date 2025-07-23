@@ -205,7 +205,7 @@ ai-agent/
    pip install -r requirements.txt
    ```
 
-2. **Set up API keys:**
+2. **Set up API keys**
 
 
 3. **Start chatting:**
