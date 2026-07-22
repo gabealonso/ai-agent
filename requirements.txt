@@ -1,15 +1,16 @@
-# Core LangChain packages
+# Core LangChain / LangGraph
 langchain>=0.3.0
 langchain-community>=0.3.0
 langchain-openai>=0.1.0
-langchain-core>=0.3.0
-
-# LangGraph for agent orchestration
 langgraph>=0.5.0
-langgraph-checkpoint-sqlite>=0.1.0
 
 # Search tools
 langchain-tavily>=0.1.0
+wikipedia>=1.4.0
 
-# Environment and configuration
+# Environment
 python-dotenv>=1.0.0
+
+# Optional providers (uncomment + set the matching API key to use these models):
+# langchain-anthropic>=0.2.0     # for "anthropic:..." models (ANTHROPIC_API_KEY)
+# langchain-google-genai>=2.0.0  # for "google:..." models (GOOGLE_API_KEY)

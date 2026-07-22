@@ -1,201 +1,101 @@
 """
-Configuration file for the AI Agent
+Configuration for the AI Agent.
 
-This file contains all the configurable parameters for the AI agent,
-making it easy to customize behavior without modifying the core code.
+Only settings that are actually used by the app live here, so this file is the
+single source of truth for the agent's behavior. Import it wherever a value is
+needed instead of hardcoding.
 """
 
 import os
-from typing import List, Optional
+from typing import List
 
-# Model Configuration
+# --- Model ---------------------------------------------------------------
+
+# Default model, in the "provider:model" form understood by init_chat_model.
 DEFAULT_MODEL = "openai:gpt-4o-mini"
-AVAILABLE_MODELS = {
-    "openai": [
-        "openai:gpt-4o-mini",
-        "openai:gpt-4o",
-        "openai:gpt-3.5-turbo"
-    ],
-    "anthropic": [
-        "anthropic:claude-3-5-sonnet-20241022",
-        "anthropic:claude-3-haiku-20240307"
-    ],
-    "google": [
-        "google:gemini-1.5-flash",
-        "google:gemini-1.5-pro"
-    ]
+
+# Models known to work out of the box (langchain-openai is installed). Other
+# providers also work with init_chat_model, but need their own package and API
+# key — e.g. `pip install langchain-anthropic` + ANTHROPIC_API_KEY for
+# "anthropic:...", or langchain-google-genai + GOOGLE_API_KEY for "google:...".
+AVAILABLE_MODELS = [
+    "openai:gpt-4o-mini",
+    "openai:gpt-4o",
+    "openai:gpt-3.5-turbo",
+]
+
+# Maps a model's provider prefix to the API key it needs.
+PROVIDER_ENV_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
 }
 
-# Search Configuration
+# --- Search --------------------------------------------------------------
+
 TAVILY_MAX_RESULTS = 5
 WIKIPEDIA_MAX_RESULTS = 3
 
-# Memory Configuration
-MEMORY_TYPE = "memory_saver"  # Options: "memory_saver", "sqlite"
+# --- Agent behavior ------------------------------------------------------
 
-# Chat Configuration
+SYSTEM_PROMPT = """You are a helpful AI assistant with access to Wikipedia and Tavily search tools.
+
+IMPORTANT INSTRUCTIONS:
+1. Always remember information the user shares with you (name, age, location, preferences, etc.)
+2. When asked about the user's personal information, respond with what they told you
+3. Use Wikipedia for detailed, factual information about people, places, historical events, and concepts
+4. Use Tavily for current information, weather, news, and real-time data
+5. Be conversational and friendly in your responses
+6. If you don't need to search for information, just respond conversationally
+
+Remember: The user's name, age, location, and other personal details they share are important to remember throughout the conversation."""
+
+# --- Chat display --------------------------------------------------------
+
 CHAT_PROMPT = "You: "
 AGENT_PROMPT = "Agent: "
-MAX_CONVERSATION_LENGTH = 100  # Maximum number of messages to keep in memory
-
-# Tool Selection Configuration
-TOOL_SELECTION_STRATEGY = "intelligent"  # Options: "intelligent", "manual"
-
-# Wikipedia Tool Keywords (queries containing these words will prefer Wikipedia)
-WIKIPEDIA_KEYWORDS = [
-    "who was", "biography", "history", "definition", "what is",
-    "tell me about", "explain", "concept", "theory", "scientist",
-    "inventor", "artist", "writer", "philosopher", "mathematician",
-    "physicist", "chemist", "biologist", "geography", "country",
-    "city", "landmark", "monument", "museum", "university",
-    "company", "organization", "institution", "book", "movie",
-    "film", "music", "album", "song", "painting", "sculpture"
-]
-
-# Tavily Tool Keywords (queries containing these words will prefer Tavily)
-TAVILY_KEYWORDS = [
-    "weather", "forecast", "temperature", "news", "latest",
-    "current", "today", "recent", "breaking", "live",
-    "stock", "price", "market", "trading", "crypto",
-    "bitcoin", "ethereum", "sports", "score", "game",
-    "election", "politics", "traffic", "accident", "disaster",
-    "earthquake", "hurricane", "flood", "fire", "emergency",
-    "product", "release", "update", "announcement", "event"
-]
-
-# Environment Variables
-REQUIRED_ENV_VARS = ["TAVILY_API_KEY"]
-OPTIONAL_ENV_VARS = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"]
-
-# Logging Configuration
-LOG_LEVEL = "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
-# Performance Configuration
-REQUEST_TIMEOUT = 30  # seconds
-MAX_RETRIES = 3
-RETRY_DELAY = 1  # seconds
-
-# Output Configuration
-STREAM_RESPONSES = True
-SHOW_TOOL_CALLS = False  # Whether to show which tool was used
-SHOW_THREAD_ID = True
-
-# Conversation Management
-AUTO_CLEANUP_OLD_CONVERSATIONS = True
-CONVERSATION_CLEANUP_DAYS = 7  # Remove conversations older than this many days
-
-# Error Handling
-SHOW_DETAILED_ERRORS = False  # Set to True for debugging
-GRACEFUL_DEGRADATION = True  # Continue with partial results if one tool fails
 
 
-def get_model_config() -> dict:
+def provider_of(model_name: str) -> str:
     """
-    Get the current model configuration.
-    
-    Returns:
-        dict: Model configuration
+    Return the provider prefix of a "provider:model" name.
+
+    @param model_name - A model name such as "openai:gpt-4o-mini".
+    @returns The provider part ("openai"), or the whole string if there is no prefix.
     """
-    return {
-        "default_model": DEFAULT_MODEL,
-        "available_models": AVAILABLE_MODELS,
-        "current_model": os.getenv("DEFAULT_MODEL", DEFAULT_MODEL)
-    }
+    return model_name.split(":", 1)[0]
 
 
-def get_search_config() -> dict:
+def required_env_vars(model_name: str = DEFAULT_MODEL) -> List[str]:
     """
-    Get the current search configuration.
-    
-    Returns:
-        dict: Search configuration
+    Return the environment variables required to run with the given model.
+
+    Tavily is always needed (the search tool); the model's provider key depends
+    on which model is selected.
+
+    @param model_name - The model the agent will use.
+    @returns The list of required environment variable names.
     """
-    return {
-        "tavily_max_results": TAVILY_MAX_RESULTS,
-        "wikipedia_max_results": WIKIPEDIA_MAX_RESULTS,
-        "wikipedia_keywords": WIKIPEDIA_KEYWORDS,
-        "tavily_keywords": TAVILY_KEYWORDS
-    }
+    keys = ["TAVILY_API_KEY"]
+    provider_key = PROVIDER_ENV_KEYS.get(provider_of(model_name))
+    if provider_key:
+        keys.append(provider_key)
+    return keys
 
 
-def get_chat_config() -> dict:
+def validate_config(model_name: str = DEFAULT_MODEL) -> List[str]:
     """
-    Get the current chat configuration.
-    
-    Returns:
-        dict: Chat configuration
-    """
-    return {
-        "chat_prompt": CHAT_PROMPT,
-        "agent_prompt": AGENT_PROMPT,
-        "max_conversation_length": MAX_CONVERSATION_LENGTH,
-        "stream_responses": STREAM_RESPONSES,
-        "show_tool_calls": SHOW_TOOL_CALLS,
-        "show_thread_id": SHOW_THREAD_ID
-    }
+    Validate that the environment is ready to run with the given model.
 
-
-def validate_config() -> List[str]:
-    """
-    Validate the current configuration.
-    
-    Returns:
-        List[str]: List of validation errors (empty if valid)
+    @param model_name - The model the agent will use.
+    @returns A list of human-readable error strings (empty when everything is set).
     """
     errors = []
-    
-    # Check required environment variables
-    for var in REQUIRED_ENV_VARS:
+    for var in required_env_vars(model_name):
         if not os.getenv(var):
             errors.append(f"Missing required environment variable: {var}")
-    
-    # Check model configuration
-    if DEFAULT_MODEL not in [model for models in AVAILABLE_MODELS.values() for model in models]:
-        errors.append(f"Default model '{DEFAULT_MODEL}' not found in available models")
-    
-    # Check search configuration
     if TAVILY_MAX_RESULTS <= 0:
         errors.append("TAVILY_MAX_RESULTS must be greater than 0")
-    
     if WIKIPEDIA_MAX_RESULTS <= 0:
         errors.append("WIKIPEDIA_MAX_RESULTS must be greater than 0")
-    
     return errors
-
-
-def print_config_summary():
-    """
-    Print a summary of the current configuration.
-    """
-    print("🔧 AI Agent Configuration Summary")
-    print("=" * 40)
-    print(f"Default Model: {DEFAULT_MODEL}")
-    print(f"Tavily Max Results: {TAVILY_MAX_RESULTS}")
-    print(f"Wikipedia Max Results: {WIKIPEDIA_MAX_RESULTS}")
-    print(f"Memory Type: {MEMORY_TYPE}")
-    print(f"Tool Selection: {TOOL_SELECTION_STRATEGY}")
-    print(f"Stream Responses: {STREAM_RESPONSES}")
-    print(f"Show Tool Calls: {SHOW_TOOL_CALLS}")
-    print()
-    
-    # Check environment variables
-    print("Environment Variables:")
-    for var in REQUIRED_ENV_VARS:
-        status = "✅" if os.getenv(var) else "❌"
-        print(f"  {status} {var}")
-    
-    for var in OPTIONAL_ENV_VARS:
-        status = "✅" if os.getenv(var) else "⚠️"
-        print(f"  {status} {var}")
-    
-    print()
-    
-    # Validation
-    errors = validate_config()
-    if errors:
-        print("❌ Configuration Errors:")
-        for error in errors:
-            print(f"  - {error}")
-    else:
-        print("✅ Configuration is valid!") 
