@@ -1,161 +1,106 @@
 """
 AI Agent Chat Application
 
-This is a conversational interface to chat with an AI agent that can search
-using both Wikipedia and Tavily, with conversational memory.
+A conversational interface to chat with an AI agent that can search using both
+Wikipedia and Tavily, with per-conversation memory (LangGraph checkpointer).
 """
 
 import os
-import uuid
+
 from dotenv import load_dotenv
+
+import config
 from agents.ai_agent import create_agent, generate_thread_id
 
 # Load environment variables
 load_dotenv()
 
 
-def setup_environment():
+def setup_environment() -> bool:
     """
-    Setup environment variables and validate required API keys.
+    Validate that the environment has the keys required for the default model.
+
+    @returns True when everything required is present, False otherwise.
     """
-    # Check for required API keys
-    required_keys = ["TAVILY_API_KEY"]
-    optional_keys = ["OPENAI_API_KEY"]
-    
-    missing_required = []
-    missing_optional = []
-    
-    for key in required_keys:
-        if not os.getenv(key):
-            missing_required.append(key)
-    
-    for key in optional_keys:
-        if not os.getenv(key):
-            missing_optional.append(key)
-    
-    if missing_required:
-        print(f"⚠️ Missing required environment variables: {', '.join(missing_required)}")
-        print("These are required for the agent to function:")
-        for key in missing_required:
-            if key == "TAVILY_API_KEY":
-                print(f"  {key}=your-tavily-api-key")
+    missing = [key for key in config.required_env_vars() if not os.getenv(key)]
+    if missing:
+        print(f"⚠️ Missing required environment variables: {', '.join(missing)}")
+        print("Add them to your .env file (see .env.example). The agent needs:")
+        for key in missing:
+            print(f"  {key}=your-{key.lower().replace('_', '-')}")
         return False
-    
-    if missing_optional:
-        print(f"⚠️ Missing optional environment variables: {', '.join(missing_optional)}")
-        print("These are optional but recommended for better performance:")
-        for key in missing_optional:
-            if key == "OPENAI_API_KEY":
-                print(f"  {key}=your-openai-api-key")
-        print("The agent will work without these keys, but may have limited functionality.")
-    
     return True
 
 
-def format_message(message):
+def chat_with_agent(agent) -> None:
     """
-    Format a message for display.
-    
-    Args:
-        message: The message object from LangChain
-        
-    Returns:
-        str: Formatted message string
-    """
-    # Handle different message types
-    if hasattr(message, 'content'):
-        # For AIMessage, HumanMessage, etc.
-        return str(message.content)
-    elif hasattr(message, 'pretty_print'):
-        # For messages that support pretty_print
-        return str(message)
-    elif isinstance(message, dict):
-        # For dictionary messages
-        return message.get('content', str(message))
-    else:
-        # Fallback
-        return str(message)
+    Run the interactive chat loop against the agent.
 
-
-def chat_with_agent(agent_executor, memory):
-    """
-    Chat with the AI agent in a natural conversation.
-    
-    Args:
-        agent_executor: The configured agent executor
-        memory: The conversation buffer memory
+    @param agent - The compiled LangGraph agent.
     """
     print("Chat with Albert 1.0")
     print("=" * 40)
     print("Type 'quit' to exit, 'new' to start a new conversation")
     print("=" * 40)
     print()
-    
+
+    thread_id = generate_thread_id()
+
     while True:
         try:
-            # Get user input
-            user_input = input("You: ").strip()
-            
-            # Check for exit commands
-            if user_input.lower() in ['quit', 'exit', 'q']:
+            user_input = input(config.CHAT_PROMPT).strip()
+
+            if user_input.lower() in ["quit", "exit", "q"]:
                 print("Goodbye!")
                 break
-            
-            # Check for new conversation command
-            if user_input.lower() == 'new':
-                # Clear memory for new conversation
-                memory.clear()
+
+            if user_input.lower() == "new":
+                # A fresh thread id starts a new, empty conversation.
+                thread_id = generate_thread_id()
                 print("New conversation started.")
                 print()
                 continue
-            
-            # Validate input
+
             if not user_input:
                 print("Please enter a message.")
                 continue
-            
-            # Get response from agent (memory is handled automatically)
-            response = agent_executor.invoke({"input": user_input})
-            
-            # Display agent's response
-            if "output" in response:
-                print(f"Agent: {response['output']}")
-            else:
-                print("Agent: I'm sorry, I didn't get a response. Could you try again?")
-            
+
+            # The checkpointer keeps this thread's history, so we only send the
+            # new message; prior turns are recalled by thread_id.
+            result = agent.invoke(
+                {"messages": [{"role": "user", "content": user_input}]},
+                config={"configurable": {"thread_id": thread_id}},
+            )
+            answer = result["messages"][-1].content
+            print(f"{config.AGENT_PROMPT}{answer}")
             print()
-            
+
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
             break
-        except Exception as e:
-            print(f"\nError: {e}")
+        except Exception as error:
+            print(f"\nError: {error}")
             print("Please try again.")
 
 
-def main():
+def main() -> None:
     """
-    Main application entry point.
+    Application entry point: validate the environment, build the agent, chat.
     """
     print("Starting AI Agent...")
-    
-    # Setup environment
+
     if not setup_environment():
         return
-    
+
     try:
-        # Create the agent
-        agent_executor, memory = create_agent()
+        agent = create_agent()
         print("Agent is ready to chat!")
         print()
-        
-        # Start the conversation
-        chat_with_agent(agent_executor, memory)
-        
-    except Exception as e:
-        print(f"Failed to start agent: {e}")
+        chat_with_agent(agent)
+    except Exception as error:
+        print(f"Failed to start agent: {error}")
         print("Please check your configuration and try again.")
 
 
 if __name__ == "__main__":
-    main() 
+    main()
